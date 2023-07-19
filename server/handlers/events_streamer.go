@@ -115,18 +115,18 @@ STOP:
 			} else {
 				localMeshAdaptersLock.Lock()
 				for _, ma := range meshAdapters {
-					mClient, ok := localMeshAdapters[ma.Location]
+					mClient, ok := localMeshAdapters[ma.Host]
 					if !ok {
-						mClient, err = meshes.CreateClient(req.Context(), ma.Location)
+						mClient, err = meshes.CreateClient(req.Context(), ma.Host)
 						if err == nil {
-							localMeshAdapters[ma.Location] = mClient
+							localMeshAdapters[ma.Host] = mClient
 						}
 					}
 					if mClient != nil {
 						_, err = mClient.MClient.MeshName(req.Context(), &meshes.MeshNameRequest{})
 						if err != nil {
 							_ = mClient.Close()
-							delete(localMeshAdapters, ma.Location)
+							delete(localMeshAdapters, ma.Host)
 						} else {
 							if !ok { // reusing the map check, only when ok is false a new entry will be added
 								newAdaptersChan <- mClient

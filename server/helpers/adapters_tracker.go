@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"sync"
@@ -16,22 +17,33 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/layer5io/meshery/server/helpers/utils"
 	"github.com/layer5io/meshery/server/models"
+	"github.com/layer5io/meshkit/logger"
 )
 
 // AdaptersTracker is used to hold the list of known adapters
 type AdaptersTracker struct {
 	adapters     map[string]models.Adapter
 	adaptersLock *sync.Mutex
+	log          logger.Handler
 }
 
 // NewAdaptersTracker returns an instance of AdaptersTracker
 func NewAdaptersTracker(adapterURLs []string) *AdaptersTracker {
-	initialAdapters := map[string]models.Adapter{}
+	initialAdapters := make(map[string]models.Adapter)
 	for _, u := range adapterURLs {
-		initialAdapters[u] = models.Adapter{
-			Location: u,
+		port, err := extractPortFromURL(u)
+		if err != nil {
+			// Handle error accordingly
+			continue
 		}
+
+		adapter := models.Adapter{
+			Host: u,
+			Port: port,
+		}
+		initialAdapters[u] = adapter
 	}
+
 	a := &AdaptersTracker{
 		adapters:     initialAdapters,
 		adaptersLock: &sync.Mutex{},
@@ -40,18 +52,37 @@ func NewAdaptersTracker(adapterURLs []string) *AdaptersTracker {
 	return a
 }
 
+func extractPortFromURL(urlStr string) (int, error) {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return 0, err
+	}
+
+	portStr := parsedURL.Port()
+	if portStr == "" {
+		return 0, fmt.Errorf("no port specified in URL")
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0, err
+	}
+
+	return port, nil
+}
+
 // AddAdapter is used to add new adapters to the collection
 func (a *AdaptersTracker) AddAdapter(_ context.Context, adapter models.Adapter) {
 	a.adaptersLock.Lock()
 	defer a.adaptersLock.Unlock()
-	a.adapters[adapter.Location] = adapter
+	a.adapters[adapter.Name] = adapter
 }
 
 // RemoveAdapter is used to remove existing adapters from the collection
 func (a *AdaptersTracker) RemoveAdapter(_ context.Context, adapter models.Adapter) {
 	a.adaptersLock.Lock()
 	defer a.adaptersLock.Unlock()
-	delete(a.adapters, adapter.Location)
+	delete(a.adapters, adapter.Name)
 }
 
 // GetAdapters returns the list of existing adapters
@@ -70,12 +101,12 @@ func (a *AdaptersTracker) GetAdapters(_ context.Context) []models.Adapter {
 func (a *AdaptersTracker) DeployAdapter(ctx context.Context, adapter models.Adapter) error {
 	platform := utils.GetPlatform()
 
-	// Deploy to current platform
+	// Deploy to the current platform
 	switch platform {
 	case "docker":
 		cli, err := client.NewClientWithOpts(client.FromEnv)
 		if err != nil {
-			return ErrAdapterAdministration(err)
+			return fmt.Errorf("failed to create Docker client: %w", err)
 		}
 
 		adapterImage := "layer5/" + adapter.Name + ":stable-latest"
@@ -83,14 +114,13 @@ func (a *AdaptersTracker) DeployAdapter(ctx context.Context, adapter models.Adap
 		// Pull the latest image
 		reader, err := cli.ImagePull(ctx, adapterImage, types.ImagePullOptions{})
 		if err != nil {
-			return ErrAdapterAdministration(err)
+			return fmt.Errorf("failed to pull Docker image: %w", err)
 		}
 		defer reader.Close()
 		_, _ = io.Copy(os.Stdout, reader)
 
 		// Create and start the container
-		portNum := adapter.Location
-		adapter.Location = "localhost:" + adapter.Location
+		portNum := strconv.Itoa(adapter.Port)
 		port := nat.Port(portNum + "/tcp")
 		resp, err := cli.ContainerCreate(ctx, &container.Config{
 			Image: adapterImage,
@@ -108,16 +138,15 @@ func (a *AdaptersTracker) DeployAdapter(ctx context.Context, adapter models.Adap
 			},
 		}, &network.NetworkingConfig{}, nil, adapter.Name+"-"+fmt.Sprint(time.Now().Unix()))
 		if err != nil {
-			return ErrAdapterAdministration(err)
+			return fmt.Errorf("failed to create Docker container: %w", err)
 		}
 
 		if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
-			return ErrAdapterAdministration(err)
+			return fmt.Errorf("failed to start Docker container: %w", err)
 		}
 
-	// switch to default case if the platform specified is not supported
 	default:
-		return ErrAdapterAdministration(fmt.Errorf("the platform %s is not supported currently. The supported platforms are:\ndocker\nkubernetes", platform))
+		return fmt.Errorf("the platform %s is not currently supported. The supported platforms are: docker, kubernetes", platform)
 	}
 
 	a.AddAdapter(ctx, adapter)
@@ -128,43 +157,50 @@ func (a *AdaptersTracker) DeployAdapter(ctx context.Context, adapter models.Adap
 func (a *AdaptersTracker) UndeployAdapter(ctx context.Context, adapter models.Adapter) error {
 	platform := utils.GetPlatform()
 
-	// Undeploy from current platform
+	// Undeploy from the current platform
 	switch platform {
 	case "docker":
 		cli, err := client.NewClientWithOpts(client.FromEnv)
 		if err != nil {
-			return ErrAdapterAdministration(err)
+			return fmt.Errorf("failed to create Docker client: %w", err)
 		}
 
 		containers, err := cli.ContainerList(ctx, types.ContainerListOptions{})
 		if err != nil {
-			return ErrAdapterAdministration(err)
+			return fmt.Errorf("failed to list Docker containers: %w", err)
 		}
-		var containerID string
+
+		found := false
 		for _, container := range containers {
 			for _, p := range container.Ports {
-				if strconv.Itoa(int(p.PublicPort)) == adapter.Location {
-					containerID = container.ID
+				if strconv.Itoa(int(p.PublicPort)) == strconv.Itoa(adapter.Port) {
+					found = true
+
+					// Stop and remove the container
+					err = cli.ContainerStop(ctx, container.ID, nil)
+					if err != nil {
+						return fmt.Errorf("failed to stop Docker container: %w", err)
+					}
+
+					err = cli.ContainerRemove(ctx, container.ID, types.ContainerRemoveOptions{
+						Force:         true,
+						RemoveVolumes: true,
+					})
+					if err != nil {
+						return fmt.Errorf("failed to remove Docker container: %w", err)
+					}
+
 					break
 				}
 			}
 		}
-		if containerID == "" {
-			return ErrAdapterAdministration(fmt.Errorf("no container found for port %s", adapter.Location))
+
+		if !found {
+			return fmt.Errorf("no container found for port %d", adapter.Port)
 		}
 
-		// Stop and remove the container
-		err = cli.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
-			Force:         true,
-			RemoveVolumes: true,
-		})
-		if err != nil {
-			return ErrAdapterAdministration(err)
-		}
-
-	// switch to default case if the platform specified is not supported
 	default:
-		return ErrAdapterAdministration(fmt.Errorf("the platform %s is not supported currently. The supported platforms are:\ndocker\nkubernetes", platform))
+		return fmt.Errorf("the platform %s is not currently supported. The supported platforms are: docker, kubernetes", platform)
 	}
 
 	a.RemoveAdapter(ctx, adapter)

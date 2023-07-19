@@ -279,7 +279,7 @@ func setOverrideValues(delete bool, adapterTracker AdaptersTrackerInterface) map
 
 	for _, adapter := range adapters {
 		if adapter.Name != "" {
-			installedAdapters = append(installedAdapters, strings.Split(adapter.Location, ":")[0])
+			installedAdapters = append(installedAdapters, strings.Split(adapter.Host, ":")[0])
 		}
 	}
 

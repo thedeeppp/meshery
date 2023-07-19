@@ -121,8 +121,9 @@ func TestCheckK8sVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run("Check K8s Version", func(t *testing.T) {
-			if got := CheckK8sVersion(tt.version); got != nil {
-				t.Errorf("getK8sVersion() = %v, want %v", got, tt.expected)
+			got, _ := CheckK8sVersion(tt.version)
+			if got != "" {
+				t.Errorf("CheckK8sVersion() = %v, want %v", got, tt.expected)
 			}
 		})
 	}

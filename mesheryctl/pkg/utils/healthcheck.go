@@ -26,7 +26,7 @@ var minKubectlVersion = minAPIVersion
 
 // GetK8sVersionInfo returns version.Info for the Kubernetes cluster.
 func GetK8sVersionInfo() (*version.Info, error) {
-	// create an kubernetes client
+	// create a Kubernetes client
 	client, err := meshkitkube.New([]byte(""))
 	if err != nil {
 		return nil, err
@@ -34,19 +34,19 @@ func GetK8sVersionInfo() (*version.Info, error) {
 	return client.KubeClient.Discovery().ServerVersion()
 }
 
-func CheckK8sVersion(versionInfo *version.Info) error {
+func CheckK8sVersion(versionInfo *version.Info) (string, error) {
 	apiVersion, err := getK8sVersion(versionInfo.String())
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if !isCompatibleVersion(minAPIVersion, apiVersion) {
-		return fmt.Errorf("kubernetes is on version [%d.%d.%d], but version [%d.%d.%d] or more recent is required",
+		return "", fmt.Errorf("Kubernetes is on version [%d.%d.%d], but version [%d.%d.%d] or more recent is required",
 			apiVersion[0], apiVersion[1], apiVersion[2],
 			minAPIVersion[0], minAPIVersion[1], minAPIVersion[2])
 	}
 
-	return nil
+	return fmt.Sprintf("%d.%d.%d", apiVersion[0], apiVersion[1], apiVersion[2]), nil
 }
 
 func getK8sVersion(versionString string) ([3]int, error) {
@@ -74,26 +74,26 @@ func getK8sVersion(versionString string) ([3]int, error) {
 
 // CheckKubectlVersion validates whether the installed kubectl version is
 // running a minimum kubectl version.
-func CheckKubectlVersion() error {
+func CheckKubectlVersion() (string, error) {
 	cmd := exec.Command("kubectl", "version", "--client", "--short")
 	bytes, err := cmd.Output()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	clientVersion := fmt.Sprintf("%s\n", bytes)
 	kubectlVersion, err := parseKubectlShortVersion(clientVersion)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if !isCompatibleVersion(minKubectlVersion, kubectlVersion) {
-		return fmt.Errorf("kubectl is on version [%d.%d.%d], but version [%d.%d.%d] or more recent is required",
+		return "", fmt.Errorf("kubectl is on version [%d.%d.%d], but version [%d.%d.%d] or more recent is required",
 			kubectlVersion[0], kubectlVersion[1], kubectlVersion[2],
 			minKubectlVersion[0], minKubectlVersion[1], minKubectlVersion[2])
 	}
 
-	return nil
+	return fmt.Sprintf("%d.%d.%d", kubectlVersion[0], kubectlVersion[1], kubectlVersion[2]), nil
 }
 
 func isCompatibleVersion(minimalRequirementVersion [3]int, actualVersion [3]int) bool {

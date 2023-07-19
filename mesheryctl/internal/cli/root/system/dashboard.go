@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"time"
 
@@ -93,19 +94,22 @@ mesheryctl system dashboard --port-forward
 		if err != nil {
 			return errors.Wrap(err, "error processing config")
 		}
+
 		currCtx, err := mctlCfg.GetCurrentContext()
 		if err != nil {
-			return err
+			return errors.Wrap(err, "failed to get current context")
 		}
+
 		log.Debug("Fetching Meshery-UI endpoint")
 
 		switch currCtx.GetPlatform() {
 		case "docker":
+			// Handle Docker platform if needed
 			break
 		case "kubernetes":
 			client, err := meshkitkube.New([]byte(""))
 			if err != nil {
-				return err
+				return errors.Wrap(err, "failed to create Kubernetes client")
 			}
 
 			// Run port forwarding for accessing Meshery UI
@@ -116,10 +120,10 @@ mesheryctl system dashboard --port-forward
 				signal.Notify(signals, os.Interrupt)
 				defer signal.Stop(signals)
 
-				// get a free port number to bind port-forwarding
+				// Get a free port number to bind port-forwarding
 				port, err := utils.GetEphemeralPort()
 				if err != nil {
-					return ErrFailedGetEphemeralPort(err)
+					return errors.Wrap(err, "failed to get ephemeral port")
 				}
 
 				portforward, err := utils.NewPortForward(
@@ -133,19 +137,18 @@ mesheryctl system dashboard --port-forward
 					false,
 				)
 				if err != nil {
-					return ErrInitPortForward(err)
-
+					return errors.Wrap(err, "failed to initialize port forwarding")
 				}
 
 				if err = portforward.Init(); err != nil {
-					// TODO: consider falling back to an ephemeral port if defaultPort is taken
-					return ErrRunPortForward(err)
+					return errors.Wrap(err, "failed to start port forwarding")
 				}
+
 				log.Info("Starting Port-forwarding for Meshery UI")
 
 				mesheryURL := portforward.URLFor("")
 
-				// ticker for keeping connection alive with pod each 10 seconds
+				// Ticker for keeping connection alive with the pod every 10 seconds
 				ticker := time.NewTicker(10 * time.Second)
 				go func() {
 					for {
@@ -159,33 +162,36 @@ mesheryctl system dashboard --port-forward
 						}
 					}
 				}()
+
 				log.Info(fmt.Sprintf("Forwarding ports %v -> %v", options.podPort, port))
 				log.Info("Meshery UI available at: ", mesheryURL)
 				log.Info("Opening Meshery UI in the default browser.")
-				err = utils.NavigateToBrowser(mesheryURL)
-				if err != nil {
-					log.Warn("Failed to open Meshery in browser, please point your browser to " + currCtx.GetEndpoint() + " to access Meshery.")
+
+				if err := utils.NavigateToBrowser(mesheryURL); err != nil {
+					log.Warn("Failed to open Meshery in the browser, please point your browser to " + currCtx.GetEndpoint() + " to access Meshery.")
 				}
 
 				<-portforward.GetStop()
 				return nil
 			}
 
+			// Get Meshery service endpoint
 			var mesheryEndpoint string
-			var endpoint *meshkitutils.Endpoint
 			clientset := client.KubeClient
 			var opts meshkitkube.ServiceOptions
 			opts.Name = "meshery"
 			opts.Namespace = utils.MesheryNamespace
 			opts.APIServerURL = client.RestConfig.Host
 
-			endpoint, err = meshkitkube.GetServiceEndpoint(context.TODO(), clientset, &opts)
+			endpoint, err := meshkitkube.GetServiceEndpoint(context.TODO(), clientset, &opts)
 			if err != nil {
-				return err
+				return errors.Wrap(err, "failed to get Meshery service endpoint")
 			}
 
 			mesheryEndpoint = fmt.Sprintf("%s://%s:%d", utils.EndpointProtocol, endpoint.Internal.Address, endpoint.Internal.Port)
 			currCtx.SetEndpoint(mesheryEndpoint)
+
+			// Check internal and external endpoints
 			if !meshkitutils.TcpCheck(&meshkitutils.HostPort{
 				Address: endpoint.Internal.Address,
 				Port:    endpoint.Internal.Port,
@@ -206,18 +212,24 @@ mesheryctl system dashboard --port-forward
 				}
 			}
 
-			if err == nil {
-				err = config.UpdateContextInConfig(currCtx, mctlCfg.GetCurrentContextName())
-				if err != nil {
-					return err
-				}
+			if err := config.UpdateContextInConfig(currCtx, mctlCfg.GetCurrentContextName()); err != nil {
+				return errors.Wrap(err, "failed to update context in config")
 			}
-
 		}
 
 		if !skipBrowserFlag {
-			log.Info("Opening Meshery (" + currCtx.GetEndpoint() + ") in browser.")
-			err = utils.NavigateToBrowser(currCtx.GetEndpoint())
+			log.Info("Opening Meshery (" + currCtx.GetEndpoint() + ") in the browser.")
+
+			browserCmd := "w3m" // Default browser in Ubuntu on WSL 2
+			if isBrowserAvailable("firefox") {
+				browserCmd = "firefox"
+			} else if isBrowserAvailable("chromium-browser") {
+				browserCmd = "chromium-browser"
+			} else if isBrowserAvailable("google-chrome") {
+				browserCmd = "google-chrome"
+			}
+
+			err := launchBrowser(browserCmd, currCtx.GetEndpoint())
 			if err != nil {
 				log.Warn("Failed to open Meshery in your browser, please point your browser to " + currCtx.GetEndpoint() + " to access Meshery.")
 			}
@@ -227,6 +239,17 @@ mesheryctl system dashboard --port-forward
 
 		return nil
 	},
+}
+
+func isBrowserAvailable(browserCmd string) bool {
+	cmd := exec.Command("which", browserCmd)
+	err := cmd.Run()
+	return err == nil
+}
+
+func launchBrowser(browserCmd, url string) error {
+	cmd := exec.Command(browserCmd, url)
+	return cmd.Start()
 }
 
 // keepConnectionAlive to stop being timed out with port forwarding

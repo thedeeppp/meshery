@@ -491,3 +491,9 @@ func AddContextToConfig(contextName string, context Context, configPath string, 
 
 	return nil
 }
+
+// Check if Kubernetes Context exists or not
+func (mctlCfg *MesheryCtlConfig) ContextExists(contextName string) bool {
+	_, exists := mctlCfg.Contexts[contextName]
+	return exists
+}

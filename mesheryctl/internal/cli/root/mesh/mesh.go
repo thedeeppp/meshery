@@ -111,7 +111,7 @@ func validateAdapter(mctlCfg *config.MesheryCtlConfig, meshName string) error {
 	// search for the mesh's adapter and update adapterURL accordingly
 	for _, adapter := range prefs.MeshAdapters {
 		if adapter.Name == meshName {
-			adapterURL = adapter.Location
+			adapterURL = adapter.Name
 			return nil
 		}
 	}

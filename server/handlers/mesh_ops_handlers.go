@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -70,49 +72,51 @@ func (h *Handler) AdaptersHandler(w http.ResponseWriter, req *http.Request, pref
 
 // AdapterPingHandler is used to ping a given adapter
 func (h *Handler) AdapterPingHandler(w http.ResponseWriter, req *http.Request, prefObj *models.Preference, _ *models.User, _ models.Provider) {
-	// if req.Method != http.MethodGet {
-	// 	w.WriteHeader(http.StatusNotFound)
-	// 	return
-	// }
-
 	meshAdapters := prefObj.MeshAdapters
 	if meshAdapters == nil {
 		meshAdapters = []*models.Adapter{}
 	}
 
-	// adapterLoc := req.PostFormValue("adapter")
 	adapterLoc := req.URL.Query().Get("adapter")
-	h.log.Debug("Adapter url to ping: ", adapterLoc)
-	logrus.Debug("Adapter url to ping: ", adapterLoc)
+	h.log.Debug("Adapter URL to ping: ", adapterLoc)
+	logrus.Debug("Adapter URL to ping: ", adapterLoc)
 
-	aID := -1
-	for i, ad := range meshAdapters {
-		if adapterLoc == ad.Location {
-			aID = i
+	var targetAdapter *models.Adapter
+	for _, ad := range meshAdapters {
+		if adapterLoc == ad.Host {
+			targetAdapter = ad
+			break
 		}
 	}
-	if aID < 0 {
+
+	if targetAdapter == nil {
 		h.log.Error(ErrValidAdapter)
 		http.Error(w, ErrValidAdapter.Error(), http.StatusBadRequest)
 		return
 	}
 
-	mClient, err := meshes.CreateClient(req.Context(), meshAdapters[aID].Location)
-	if err != nil {
-		http.Error(w, ErrMeshClient.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer func() {
-		_ = mClient.Close()
-	}()
-	_, err = mClient.MClient.MeshName(req.Context(), &meshes.MeshNameRequest{})
-	if err != nil {
-		h.log.Error(ErrMeshClient)
-		http.Error(w, ErrMeshClient.Error(), http.StatusInternalServerError)
+	if !checkAdapterPingability(targetAdapter) {
+		// h.log.Error("Adapter ping failed")
+		http.Error(w, "Adapter ping failed", http.StatusInternalServerError)
 		return
 	}
 
 	_, _ = w.Write([]byte("{}"))
+}
+
+func checkAdapterPingability(adapter *models.Adapter) bool {
+	// Custom logic to check if the adapter is pingable
+	// For example, you can establish a TCP connection to the adapter's port
+	address := fmt.Sprintf("localhost:%d", adapter.Port)
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		// Error occurred while establishing the TCP connection
+		return false
+	}
+	defer conn.Close()
+
+	// Successfully established the TCP connection
+	return true
 }
 
 // swagger:route POST /api/system/adapter/manage SystemAPI idPostAdapterConfig
@@ -183,11 +187,7 @@ func (h *Handler) MeshAdapterConfigHandler(w http.ResponseWriter, req *http.Requ
 func (h *Handler) addAdapter(ctx context.Context, meshAdapters []*models.Adapter, _ *models.Preference, meshLocationURL string, _ models.Provider) ([]*models.Adapter, error) {
 	alreadyConfigured := false
 	for _, adapter := range meshAdapters {
-		if adapter.Location == meshLocationURL {
-			// err := errors.New("Adapter with the given meshLocationURL already exists.")
-			// h.log.Error(err)
-			// http.Error(w, err.Error(), http.StatusForbidden)
-			// return nil, err
+		if adapter.Host == meshLocationURL {
 			alreadyConfigured = true
 			break
 		}
@@ -201,7 +201,6 @@ func (h *Handler) addAdapter(ctx context.Context, meshAdapters []*models.Adapter
 	mClient, err := meshes.CreateClient(ctx, meshLocationURL)
 	if err != nil {
 		h.log.Error(ErrMeshClient)
-		// http.Error(w, ErrMeshClient.Error(), http.StatusInternalServerError)
 		return meshAdapters, ErrMeshClient
 	}
 	h.log.Debug("created client for adapter: ", meshLocationURL)
@@ -211,27 +210,29 @@ func (h *Handler) addAdapter(ctx context.Context, meshAdapters []*models.Adapter
 	respOps, err := mClient.MClient.SupportedOperations(ctx, &meshes.SupportedOperationsRequest{})
 	if err != nil {
 		h.log.Error(ErrRetrieveMeshData(err))
-		// http.Error(w, ErrRetrieveMeshData(err).Error(), http.StatusInternalServerError)
 		return meshAdapters, err
 	}
 	h.log.Debug("retrieved supported ops for adapter: ", meshLocationURL)
 	meshInfo, err := mClient.MClient.ComponentInfo(ctx, &meshes.ComponentInfoRequest{})
 	if err != nil {
 		h.log.Error(ErrRetrieveMeshData(err))
-		// http.Error(w, ErrRetrieveMeshData(err).Error(), http.StatusInternalServerError)
 		return meshAdapters, err
 	}
 	h.log.Debug("retrieved name for adapter: ", meshLocationURL)
-	result := &models.Adapter{
-		Location:     meshLocationURL,
+
+	adapter := models.Adapter{
+		Host:         meshLocationURL,
 		Name:         meshInfo.Name,
 		Version:      meshInfo.Version,
 		GitCommitSHA: meshInfo.GitSha,
 		Ops:          respOps.GetOps(),
+		Port:         models.GetNextAvailablePort(),
 	}
 
-	h.config.AdapterTracker.AddAdapter(ctx, *result)
-	meshAdapters = append(meshAdapters, result)
+	adapter.Available = models.CheckAdapterAvailability(adapter) // Check if the adapter is pingable
+
+	h.config.AdapterTracker.AddAdapter(ctx, adapter)
+	meshAdapters = append(meshAdapters, &adapter)
 	return meshAdapters, nil
 }
 
@@ -243,8 +244,9 @@ func (h *Handler) deleteAdapter(meshAdapters []*models.Adapter, w http.ResponseW
 
 	aID := -1
 	for i, ad := range meshAdapters {
-		if adapterLoc == ad.Location {
+		if adapterLoc == ad.Host {
 			aID = i
+			break
 		}
 	}
 	if aID < 0 {
@@ -255,17 +257,18 @@ func (h *Handler) deleteAdapter(meshAdapters []*models.Adapter, w http.ResponseW
 
 	newMeshAdapters := []*models.Adapter{}
 	if aID == 0 {
-		newMeshAdapters = append(newMeshAdapters, meshAdapters[1:]...)
+		newMeshAdapters = meshAdapters[1:]
 	} else if aID == adaptersLen-1 {
-		newMeshAdapters = append(newMeshAdapters, meshAdapters[:adaptersLen-1]...)
+		newMeshAdapters = meshAdapters[:adaptersLen-1]
 	} else {
-		newMeshAdapters = append(newMeshAdapters, meshAdapters[0:aID]...)
-		newMeshAdapters = append(newMeshAdapters, meshAdapters[aID+1:]...)
+		newMeshAdapters = append(meshAdapters[:aID], meshAdapters[aID+1:]...)
 	}
+
 	b, _ := json.Marshal(meshAdapters)
-	h.log.Debug("Old adapters: ", b)
+	h.log.Debug("Old adapters: ", string(b))
 	b, _ = json.Marshal(newMeshAdapters)
-	h.log.Debug("New adapters: ", b)
+	h.log.Debug("New adapters: ", string(b))
+
 	return newMeshAdapters, nil
 }
 
@@ -278,14 +281,8 @@ func (h *Handler) deleteAdapter(meshAdapters []*models.Adapter, w http.ResponseW
 
 // MeshOpsHandler is used to send operations to the adapters
 func (h *Handler) MeshOpsHandler(w http.ResponseWriter, req *http.Request, prefObj *models.Preference, user *models.User, provider models.Provider) {
-	// if req.Method != http.MethodPost {
-	// 	w.WriteHeader(http.StatusNotFound)
-	// 	return
-	// }
-
 	if provider.GetProviderType() == models.RemoteProviderType {
 		token, err := provider.GetProviderToken(req)
-
 		if err == nil {
 			viper.SetDefault("opt-token", token)
 		}
@@ -296,13 +293,14 @@ func (h *Handler) MeshOpsHandler(w http.ResponseWriter, req *http.Request, prefO
 		meshAdapters = []*models.Adapter{}
 	}
 
-	adapterLoc := req.PostFormValue("adapter")
+	adapterLoc := req.FormValue("adapter")
 	h.log.Debug("Adapter URL to execute operations on: ", adapterLoc)
 
 	aID := -1
 	for i, ad := range meshAdapters {
-		if adapterLoc == ad.Location {
+		if adapterLoc == ad.Host {
 			aID = i
+			break
 		}
 	}
 	if aID < 0 {
@@ -311,29 +309,33 @@ func (h *Handler) MeshOpsHandler(w http.ResponseWriter, req *http.Request, prefO
 		return
 	}
 
-	opName := req.PostFormValue("query")
-	customBody := req.PostFormValue("customBody")
-	namespace := req.PostFormValue("namespace")
-	deleteOp := req.PostFormValue("deleteOp")
+	opName := req.FormValue("query")
+	customBody := req.FormValue("customBody")
+	namespace := req.FormValue("namespace")
+	deleteOp := req.FormValue("deleteOp")
 	if namespace == "" {
 		namespace = "default"
 	}
+
 	mk8sContexts, ok := req.Context().Value(models.KubeClustersKey).([]models.K8sContext)
 	if !ok || len(mk8sContexts) == 0 {
 		h.log.Error(ErrInvalidK8SConfig)
 		http.Error(w, ErrInvalidK8SConfig.Error(), http.StatusBadRequest)
 		return
 	}
+
 	var configs []string
 	for _, c := range mk8sContexts {
 		// Generate Kube Handler
 		kc, err := c.GenerateKubeConfig()
 		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		configs = append(configs, string(kc))
 	}
-	mClient, err := meshes.CreateClient(req.Context(), meshAdapters[aID].Location)
+
+	mClient, err := meshes.CreateClient(req.Context(), meshAdapters[aID].Host)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -341,12 +343,13 @@ func (h *Handler) MeshOpsHandler(w http.ResponseWriter, req *http.Request, prefO
 	defer func() {
 		_ = mClient.Close()
 	}()
-	operationID, err := uuid.NewV4()
 
+	operationID, err := uuid.NewV4()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	_, err = mClient.MClient.ApplyOperation(req.Context(), &meshes.ApplyRuleRequest{
 		OperationId: operationID.String(),
 		OpName:      opName,

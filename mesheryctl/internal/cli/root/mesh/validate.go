@@ -68,12 +68,13 @@ mesheryctl mesh validate istio --adapter meshery-istio --spec smi
 		}
 		//resolve adapterUrl to adapter Location
 		for _, adapter := range prefs.MeshAdapters {
-			adapterName := strings.Split(adapter.Location, ":")
-			if adapterName[0] == adapterURL {
-				adapterURL = adapter.Location
-				meshName = adapter.Location
+			if strings.HasPrefix(adapter.Host, adapterURL+":") {
+				adapterURL = adapter.Host
+				meshName = adapter.Name
+				break
 			}
 		}
+
 		//sync with available adapters
 		if err = validateAdapter(mctlCfg, meshName); err != nil {
 			log.Fatalln(err)

@@ -46,7 +46,7 @@ func (h *Handler) SessionSyncHandler(w http.ResponseWriter, req *http.Request, p
 	adapters := h.config.AdapterTracker.GetAdapters(req.Context())
 
 	for _, adapter := range adapters {
-		meshAdapters, _ = h.addAdapter(req.Context(), meshAdapters, prefObj, adapter.Location, provider)
+		meshAdapters, _ = h.addAdapter(req.Context(), meshAdapters, prefObj, adapter.Host, provider)
 	}
 	h.log.Debug("final list of active adapters: ", meshAdapters)
 	prefObj.MeshAdapters = meshAdapters

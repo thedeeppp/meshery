@@ -36,7 +36,6 @@ import (
 	meshkitkube "github.com/layer5io/meshkit/utils/kubernetes"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8sVersion "k8s.io/apimachinery/pkg/version"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -322,43 +321,42 @@ func (hc *HealthChecker) runKubernetesAPIHealthCheck() error {
 	if hc.Options.PrintLogs {
 		log.Info("\nKubernetes API \n--------------")
 	}
-	//Check whether k8s client can be initialized
+
+	// Check whether k8s client can be initialized
 	client, err := meshkitkube.New([]byte(""))
 	if err != nil {
-		if hc.context.Platform == "kubernetes" { // increase failure count
+		if hc.context.Platform == "kubernetes" {
 			failure++
 		}
-		if hc.Options.PrintLogs { // print logs if we're supposed to
+		if hc.Options.PrintLogs {
 			log.Warn("!! cannot initialize Kubernetes client")
-			log.Warn("!! cannot query the Kubernetes API")
-			return nil
+			log.Warn("!! Kubernetes cluster is not available")
+		} else {
+			return fmt.Errorf("cannot initialize Kubernetes client: %v\nPlease make sure the Kubernetes cluster is running before installing Meshery", err)
 		}
-		// else we're supposed to grab the error
-		errMsg := fmt.Errorf("%s. Your %s context is configured to run Meshery on Kubernetes using the %s token",
-			err.Error(), hc.mctlCfg.CurrentContext, hc.context.Token)
-		return ErrK8sConfig(errMsg)
-	}
-
-	if hc.Options.PrintLogs { // print logs if we're supposed to
-		log.Info("✓ can initialize Kubernetes client")
-	}
-
-	//Check whether kubernetes can be queried
-	podInterface := client.KubeClient.CoreV1().Pods("")
-	_, err = podInterface.List(context.TODO(), v1.ListOptions{})
-	if err != nil {
-		if hc.context.Platform == "kubernetes" { // increase failure count
-			failure++
+	} else {
+		if hc.Options.PrintLogs {
+			log.Info("✓ can initialize Kubernetes client")
 		}
-		if hc.Options.PrintLogs { // log incase we're supposed to
-			log.Warn("!! cannot query the Kubernetes API")
-			return nil
-		}
-		return ErrK8SQuery(err)
-	}
 
-	if hc.Options.PrintLogs { // log incase we're supposed to
-		log.Info("✓ can query the Kubernetes API")
+		// Check whether Kubernetes can be queried
+		podInterface := client.KubeClient.CoreV1().Pods("")
+		_, err = podInterface.List(context.TODO(), v1.ListOptions{})
+		if err != nil {
+			if hc.context.Platform == "kubernetes" {
+				failure++
+			}
+			if hc.Options.PrintLogs {
+				log.Warn("!! cannot query the Kubernetes API, is it running?")
+				log.Warn("!! Make sure the Kubernetes cluster is running before installing Meshery.")
+			} else {
+				return fmt.Errorf("cannot query the Kubernetes API: %v\nMake sure the Kubernetes cluster is running before installing Meshery", err)
+			}
+		} else {
+			if hc.Options.PrintLogs {
+				log.Info("✓ can query the Kubernetes API")
+			}
+		}
 	}
 
 	return nil
@@ -366,69 +364,84 @@ func (hc *HealthChecker) runKubernetesAPIHealthCheck() error {
 
 // Run healthchecks to verify kubectl and kubenetes version with
 // minimum compatible versions
-func (hc *HealthChecker) runKubernetesVersionHealthCheck() error {
+func (hc *HealthChecker) runKubernetesVersionHealthCheck() (string, string, error) {
 	if hc.Options.PrintLogs {
 		log.Info("\nKubernetes Version \n--------------")
 	}
-	//Check whether system has minimum supported versions of kubernetes and kubectl
-	var kubeVersion *k8sVersion.Info
-	kubeVersion, err := utils.GetK8sVersionInfo()
+
+	var kubeVersion, kubectlVersion string
+
+	// Check whether the system has the minimum supported versions of Kubernetes and kubectl
+	kubeVersionInfo, err := utils.GetK8sVersionInfo()
 	if err != nil {
-		if hc.context.Platform == "kubernetes" { // increase failure count
+		if hc.context.Platform == "kubernetes" {
 			failure++
 		}
-		// probably kubernetes isn't running
-		if hc.Options.PrintLogs { // log if we're supposed to
+		if hc.Options.PrintLogs {
 			log.Warn("!! cannot check Kubernetes version")
-		} else { // else we're supposed to catch the error
-			return err
+		}
+		return "", "", fmt.Errorf("cannot check Kubernetes version: %w", err)
+	}
+
+	kubeVersion = kubeVersionInfo.GitVersion
+	if hc.Options.PrintLogs {
+		log.Infof("✓ running the minimum Kubernetes version: %s", kubeVersion)
+	}
+
+	_, err = utils.CheckK8sVersion(kubeVersionInfo)
+	if err != nil {
+		if hc.context.Platform == "kubernetes" {
+			failure++
+		}
+		if hc.Options.PrintLogs {
+			log.Warnf("!! %s", err)
 		}
 	} else {
-		// kubernetes is running so check the version
-		err = utils.CheckK8sVersion(kubeVersion)
-		if err != nil {
-			if hc.context.Platform == "kubernetes" { // increase failure count
-				failure++
-			}
-			if hc.Options.PrintLogs { // log if we're supposed to
-				log.Warnf("!! %s", err)
-			} else { // else we gotta catch the error
-				return err
-			}
-		} else { // if not error we check if we are supposed to print logs
-			if hc.Options.PrintLogs { // log if we're supposed to
-				log.Info("✓ running the minimum Kubernetes version")
-			}
+		if hc.Options.PrintLogs {
+			log.Info("✓ running the minimum Kubernetes version")
 		}
 	}
 
-	err = utils.CheckKubectlVersion()
-	if err != nil {
-		if hc.context.Platform == "kubernetes" { // increase failure count
-			failure++
-		}
-		if hc.Options.PrintLogs { // log if we're supposed to
-			log.Warnf("!! %s", err)
-		} else { // else we gotta catch the error
-			return err
-		}
-	} else { // if not error we check if we are supposed to print logs
-		if hc.Options.PrintLogs { // log if we're supposed to
-			log.Info("✓ running the minimum kubectl version")
-		}
+	kubectlVersion, _ = utils.CheckKubectlVersion()
+	if hc.Options.PrintLogs && kubectlVersion != "" {
+		log.Infof("✓ running the minimum kubectl version: %s", kubectlVersion)
 	}
 
-	return nil
+	return kubeVersion, kubectlVersion, err
 }
 
 // runKubernetesHealthChecks runs checks regarding k8s api and k8s plus kubectl version
 func (hc *HealthChecker) runKubernetesHealthChecks() error {
 	// Run k8s API healthchecks
 	if err := hc.runKubernetesAPIHealthCheck(); err != nil {
-		return err
+		if hc.context.Platform == "kubernetes" {
+			failure++
+		}
+		if hc.Options.PrintLogs {
+			log.Warnf("!! %s", err)
+		}
 	}
+
 	// Run k8s plus kubectl minimum version healthchecks
-	err = hc.runKubernetesVersionHealthCheck()
+	kubeVersion, kubectlVersion, err := hc.runKubernetesVersionHealthCheck()
+	if err != nil {
+		if hc.context.Platform == "kubernetes" {
+			failure++
+		}
+		if hc.Options.PrintLogs {
+			log.Warnf("!! %s", err)
+		}
+	} else {
+		if hc.Options.PrintLogs {
+			if kubeVersion != "" {
+				log.Infof("✓ running the minimum Kubernetes version: %s", kubeVersion)
+			}
+			if kubectlVersion != "" {
+				log.Infof("✓ running the minimum kubectl version: %s", kubectlVersion)
+			}
+		}
+	}
+
 	return err
 }
 
@@ -632,8 +645,8 @@ func (hc *HealthChecker) runAdapterHealthChecks(adapterName string) error {
 	}
 	for _, adapter := range prefs.MeshAdapters {
 		if adapterName != "" {
-			name := strings.Split(adapter.Location, ":")[0]
-			if adapterName == name || adapterName == adapter.Location {
+			name := strings.Split(adapter.Host, ":")[0]
+			if adapterName == name || adapterName == adapter.Host {
 				adapters = append(adapters, adapter)
 				break
 			}
@@ -645,35 +658,30 @@ func (hc *HealthChecker) runAdapterHealthChecks(adapterName string) error {
 		return fmt.Errorf("!! Invalid adapter name provided")
 	}
 	for _, adapter := range adapters {
-		name := adapter.Location
-		skipAdapter := false
+		name := adapter.Host
 		req, err := utils.NewRequest("GET", fmt.Sprintf("%s/api/system/adapters?adapter=%s", url, name), nil)
 		if err != nil {
 			return err
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			if hc.Options.PrintLogs { // incase we're printing logs
-				log.Infof("!! failed to connect to Meshery Adapter for %s ", name)
-				skipAdapter = true
-			} else { // or we're supposed to grab the errors
-				return fmt.Errorf("!! failed to connect to Meshery Adapter for%s adapter: %s", name, err)
+			if hc.Options.PrintLogs {
+				log.Infof("!! failed to connect to Meshery Adapter for %s: %s", name, err)
+			} else {
+				return fmt.Errorf("!! failed to connect to Meshery Adapter for %s: %w", name, err)
 			}
 			continue
 		}
-		if !skipAdapter {
-			// needs multiple defer as Body.Close needs a valid response
-			defer resp.Body.Close()
-			if resp.StatusCode != 200 {
-				if hc.Options.PrintLogs { // incase we're printing logs
-					log.Infof("!! Meshery Adapter for %s is running but not reachable", name)
-				} else { // or we're supposed to grab the errors
-					return fmt.Errorf("!! Meshery Adapter for %s is running, but not reachable", name)
-				}
-			} else { // if status == 200 we check if we are supposed to print logs
-				if hc.Options.PrintLogs { // incase we're printing logs
-					log.Infof("✓ %s adapter is running and reachable", name)
-				}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			if hc.Options.PrintLogs {
+				log.Infof("!! Meshery Adapter for %s is running but not reachable", name)
+			} else {
+				return fmt.Errorf("!! Meshery Adapter for %s is running, but not reachable", name)
+			}
+		} else {
+			if hc.Options.PrintLogs {
+				log.Infof("✓ %s adapter is running and reachable", name)
 			}
 		}
 	}
