@@ -7,18 +7,32 @@ import (
 
 	"encoding/json"
 
-	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
 
 	"github.com/layer5io/meshery/server/models"
 )
 
 // UserHandler returns info about the logged in user
-func (h *Handler) UserHandler(w http.ResponseWriter, _ *http.Request, _ *models.Preference, user *models.User, _ models.Provider) {
-	if err := json.NewEncoder(w).Encode(user); err != nil {
-		obj := "user data"
-		h.log.Error(ErrEncoding(err, obj))
-		http.Error(w, ErrEncoding(err, obj).Error(), http.StatusInternalServerError)
+func (h *Handler) UserHandler(w http.ResponseWriter, r *http.Request) {
+	var user models.User
+	// Marshal user data to JSON
+	userData, err := json.Marshal(user)
+	if err != nil {
+		errMsg := "Error marshaling user data: " + err.Error()
+		// h.log.Errorf(errMsg)
+		http.Error(w, errMsg, http.StatusInternalServerError)
+		return
+	}
+
+	// Set response headers
+	w.Header().Set("Content-Type", "application/json")
+
+	// Write the user data to the response
+	_, err = w.Write(userData)
+	if err != nil {
+		errMsg := "Error writing user data to response: " + err.Error()
+		// h.log.Errorf(errMsg)
+		http.Error(w, errMsg, http.StatusInternalServerError)
 		return
 	}
 }
@@ -30,17 +44,31 @@ func (h *Handler) UserHandler(w http.ResponseWriter, _ *http.Request, _ *models.
 // responses:
 // 	200: userInfo
 
-func (h *Handler) GetUserByIDHandler(w http.ResponseWriter, r *http.Request, _ *models.Preference, _ *models.User, provider models.Provider) {
-	userID := mux.Vars(r)["id"]
+func (h *Handler) GetUserByIDHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("id")
+	if userID == "" {
+		errMsg := "User ID not provided"
+		// h.log.Errorf(errMsg)
+		http.Error(w, errMsg, http.StatusBadRequest)
+		return
+	}
+
+	var provider models.Provider
 	resp, err := provider.GetUserByID(r, userID)
 	if err != nil {
-		h.log.Error(ErrGetResult(err))
-		http.Error(w, ErrGetResult(err).Error(), http.StatusNotFound)
+		errMsg := "Error getting user by ID: " + err.Error()
+		// h.log.Errorf(errMsg)
+		http.Error(w, errMsg, http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, string(resp))
+	if _, err := w.Write(resp); err != nil {
+		errMsg := "Error writing user data to response: " + err.Error()
+		// h.log.Errorf(errMsg)
+		http.Error(w, errMsg, http.StatusInternalServerError)
+		return
+	}
 }
 
 // swagger:route GET /api/identity/users UserAPI idGetAllUsersHandler
@@ -53,7 +81,7 @@ func (h *Handler) GetUserByIDHandler(w http.ResponseWriter, r *http.Request, _ *
 // ```?page={page-number}``` Default page number is 0
 //
 // ```?pagesize={pagesize}``` Default pagesize is 20
-// 
+//
 // ```?search={username|email|first_name|last_name}``` If search is non empty then a greedy search is performed
 //
 // ```?filter={condition}```

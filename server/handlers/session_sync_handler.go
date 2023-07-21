@@ -32,30 +32,30 @@ type SessionSyncDataK8sConfig struct {
 // 	200: userLoadTestPrefsRespWrapper
 
 // SessionSyncHandler is used to send session data to the UI for initial sync
-func (h *Handler) SessionSyncHandler(w http.ResponseWriter, req *http.Request, prefObj *models.Preference, user *models.User, provider models.Provider) {
-	// if req.Method != http.MethodGet {
-	// 	w.WriteHeader(http.StatusNotFound)
-	// 	return
-	// }
+func (h *Handler) SessionSyncHandler(w http.ResponseWriter, r *http.Request) {
+	prefObj := &models.Preference{} // Initialize prefObj
+	// h.log.Debugf("Preference object: %+v", prefObj)
 
-	// To get fresh copy of User
-	_, _ = provider.GetUserDetails(req)
+	var user *models.User
+	var provider models.Provider
+
+	_, _ = provider.GetUserDetails(r)
 
 	meshAdapters := []*models.Adapter{}
 
-	adapters := h.config.AdapterTracker.GetAdapters(req.Context())
-
+	adapters := h.config.AdapterTracker.GetAdapters(r.Context())
 	for _, adapter := range adapters {
-		meshAdapters, _ = h.addAdapter(req.Context(), meshAdapters, prefObj, adapter.Location, provider)
+		meshAdapters, _ = h.addAdapter(r.Context(), meshAdapters, prefObj, adapter.Location, provider)
 	}
+
 	h.log.Debug("final list of active adapters: ", meshAdapters)
 	prefObj.MeshAdapters = meshAdapters
-	err := provider.RecordPreferences(req, user.UserID, prefObj)
+	err := provider.RecordPreferences(r, user.UserID, prefObj)
 	if err != nil { // ignoring errors in this context
-		h.log.Error(ErrSaveSession(err))
+		// h.log.Errorf("Error saving session: %v", err)
 	}
 	s := []SessionSyncDataK8sConfig{}
-	k8scontexts, ok := req.Context().Value(models.AllKubeClusterKey).([]models.K8sContext)
+	k8scontexts, ok := r.Context().Value(models.AllKubeClusterKey).([]models.K8sContext)
 	if ok {
 		for _, k8scontext := range k8scontexts {
 			var cid string
@@ -80,9 +80,9 @@ func (h *Handler) SessionSyncHandler(w http.ResponseWriter, req *http.Request, p
 
 	err = json.NewEncoder(w).Encode(data)
 	if err != nil {
-		obj := "user config data"
-		h.log.Error(ErrMarshal(err, obj))
-		http.Error(w, ErrMarshal(err, obj).Error(), http.StatusInternalServerError)
+		// obj := "user config data"
+		// h.log.Errorf("Error marshaling %s: %v", obj, err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 }

@@ -57,60 +57,55 @@ func (h *Handler) ProviderMiddleware(next http.Handler) http.Handler {
 }
 
 // AuthMiddleware is a middleware to validate if a user is authenticated
-func (h *Handler) AuthMiddleware(next http.Handler, auth models.AuthenticationMechanism) http.Handler {
-	fn := func(w http.ResponseWriter, req *http.Request) {
+func (h *Handler) AuthMiddleware(nextHandler http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		var authMechanism models.AuthenticationMechanism
 		providerH := h.Provider
-		if auth == models.NoAuth && providerH != "" {
-			auth = models.ProviderAuth //If a provider is enforced then use provider authentication even in case of NoAuth
+		if authMechanism == models.NoAuth && providerH != "" {
+			authMechanism = models.ProviderAuth // If a provider is enforced, use provider authentication even in case of NoAuth
 		}
-		switch auth {
-		// case models.NoAuth:
-		// 	if providerH != "" {
-		// 		w.WriteHeader(http.StatusUnauthorized)
-		// 		return
-		// 	}
+		switch authMechanism {
 		case models.ProviderAuth:
-			providerI := req.Context().Value(models.ProviderCtxKey)
-			// logrus.Debugf("models.ProviderCtxKey %s", models.ProviderCtxKey)
+			providerI := r.Context().Value(models.ProviderCtxKey)
 			provider, ok := providerI.(models.Provider)
 			if !ok {
-				http.Redirect(w, req, "/provider", http.StatusFound)
+				http.Redirect(w, r, "/provider", http.StatusFound)
 				return
 			}
 			if providerH != "" && providerH != provider.Name() {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			// logrus.Debugf("provider %s", provider)
-			isValid := h.validateAuth(provider, req)
-			// logrus.Debugf("validate auth: %t", isValid)
+
+			isValid, err := h.validateAuth(provider, r)
+			if err != nil {
+				// h.log.Error("error validating auth: %v", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+
 			if !isValid {
-				// if h.GetProviderType() == models.RemoteProviderType {
-				// 	http.Redirect(w, req, "/user/login", http.StatusFound)
-				// } else { // Local Provider
-				// 	h.LoginHandler(w, req)
-				// }
-				// return
 				if provider.GetProviderType() == models.RemoteProviderType {
-					provider.HandleUnAuthenticated(w, req)
-					return
+					provider.HandleUnAuthenticated(w, r)
 				}
-				// Local Provider
-				h.LoginHandler(w, req, provider, true)
+
+				h.LoginHandler(w, r, provider, true)
+				return
 			}
 		}
-		next.ServeHTTP(w, req)
+
+		nextHandler.ServeHTTP(w, r)
 	}
+
 	return http.HandlerFunc(fn)
 }
 
-func (h *Handler) validateAuth(provider models.Provider, req *http.Request) bool {
-	if err := provider.GetSession(req); err == nil {
-		// logrus.Debugf("session: %v", sess)
-		return true
+func (h *Handler) validateAuth(provider models.Provider, r *http.Request) (bool, error) {
+	if err := provider.GetSession(r); err == nil {
+		return true, err
 	}
-	// logrus.Errorf("session invalid, error: %v", err)
-	return false
+	// h.log.Errorf("session invalid for provider %s", provider.Name())
+	return false, nil
 }
 
 // MesheryControllersMiddleware is a middleware that is responsible for handling meshery controllers(operator, meshsync and broker) related stuff such as

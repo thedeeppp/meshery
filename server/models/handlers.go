@@ -10,34 +10,57 @@ import (
 	"github.com/vmihailenco/taskq/v3"
 )
 
+type IExtensionsHandler interface {
+	ExtensionsEndpointHandler(w http.ResponseWriter, req *http.Request, prefObj *Preference, user *User, provider Provider)
+	LoadExtensionFromPackage(w http.ResponseWriter, req *http.Request, provider Provider) error
+	ExtensionsVersionHandler(w http.ResponseWriter, req *http.Request, prefObj *Preference, user *User, provider Provider)
+}
+
+type IMiddlewareHandler interface {
+	AuthMiddleware(http.Handler) http.Handler
+	ProviderMiddleware(http.Handler) http.Handler
+}
+
+type IServerVersionHandler interface {
+	ServerVersionHandler(http.ResponseWriter, *http.Request)
+}
+
+type IProviderHandler interface {
+	ProviderCapabilityHandler(http.ResponseWriter, *http.Request)
+	ProviderHandler(http.ResponseWriter, *http.Request)
+	ProvidersHandler(http.ResponseWriter, *http.Request)
+	ProviderUIHandler(http.ResponseWriter, *http.Request)
+	ProviderComponentsHandler(w http.ResponseWriter, r *http.Request)
+	// NextProviderPageHandler(http.ResponseWriter, *http.Request)
+}
+
+type IAuthenticationHandler interface {
+	LoginHandler(w http.ResponseWriter, r *http.Request, provider Provider, fromMiddleware bool)
+	LogoutHandler(http.ResponseWriter, *http.Request, Provider)
+	TokenHandler(w http.ResponseWriter, r *http.Request, provider Provider, fromMiddleware bool)
+	UserHandler(http.ResponseWriter, *http.Request)
+	GetUserByIDHandler(http.ResponseWriter, *http.Request)
+	SessionSyncHandler(w http.ResponseWriter, r *http.Request)
+}
+
 // HandlerInterface defines the methods a Handler should define
 type HandlerInterface interface {
-	ServerVersionHandler(w http.ResponseWriter, r *http.Request)
-
-	ProviderMiddleware(http.Handler) http.Handler
+	IAuthenticationHandler
+	IMiddlewareHandler
+	IServerVersionHandler
+	IProviderHandler
+	IExtensionsHandler
 
 	//Set the AuthenticationMechanism as NoAuth to skip provider authentication for certain endpoints. If the provider is enforced, then this flag will not be respected.
 	//Make sure all the endpoints are behind this middleware thereby protecting them. The reason for not just skipping this middleware is:
 	//1. So that we can enfore provider through this middleware whenever want for use cases where no unauthenticated endpoints should be there, at buildtime.
 	//2. For adapter and other components of Meshery, they register/use endpoints without any provider authentication. Although we can have a different type of authentication built for
 	//such external systems trying to communicate without provider authentication. So for different endpoints, different authentication mechanisms other than provider can be used.
-	AuthMiddleware(http.Handler, AuthenticationMechanism) http.Handler
 	KubernetesMiddleware(func(http.ResponseWriter, *http.Request, *Preference, *User, Provider)) func(http.ResponseWriter, *http.Request, *Preference, *User, Provider)
 	MesheryControllersMiddleware(func(http.ResponseWriter, *http.Request, *Preference, *User, Provider)) func(http.ResponseWriter, *http.Request, *Preference, *User, Provider)
 	SessionInjectorMiddleware(func(http.ResponseWriter, *http.Request, *Preference, *User, Provider)) http.Handler
 	GraphqlMiddleware(http.Handler) func(http.ResponseWriter, *http.Request, *Preference, *User, Provider)
 
-	ProviderHandler(w http.ResponseWriter, r *http.Request)
-	ProvidersHandler(w http.ResponseWriter, r *http.Request)
-	ProviderUIHandler(w http.ResponseWriter, r *http.Request)
-	ProviderCapabilityHandler(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
-	ProviderComponentsHandler(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
-
-	TokenHandler(w http.ResponseWriter, r *http.Request, provider Provider, fromMiddleWare bool)
-	LoginHandler(w http.ResponseWriter, r *http.Request, provider Provider, fromMiddleWare bool)
-	LogoutHandler(w http.ResponseWriter, req *http.Request, provider Provider)
-	UserHandler(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
-	GetUserByIDHandler(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
 	GetUsers(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
 	K8SConfigHandler(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
 	GetContextsFromK8SConfig(w http.ResponseWriter, req *http.Request)
@@ -99,8 +122,6 @@ type HandlerInterface interface {
 	GetPerformanceProfileHandler(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
 	DeletePerformanceProfileHandler(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
 
-	SessionSyncHandler(w http.ResponseWriter, req *http.Request, prefObj *Preference, user *User, provider Provider)
-
 	PatternFileHandler(rw http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
 	GetMeshmodelCategories(rw http.ResponseWriter, r *http.Request)
 	GetMeshmodelCategoriesByName(rw http.ResponseWriter, r *http.Request)
@@ -152,10 +173,6 @@ type HandlerInterface interface {
 	GetMesheryApplicationFile(rw http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
 	DeleteMesheryApplicationHandler(rw http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
 	ShareDesignHandler(rw http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)
-
-	ExtensionsEndpointHandler(w http.ResponseWriter, req *http.Request, prefObj *Preference, user *User, provider Provider)
-	LoadExtensionFromPackage(w http.ResponseWriter, req *http.Request, provider Provider) error
-	ExtensionsVersionHandler(w http.ResponseWriter, req *http.Request, prefObj *Preference, user *User, provider Provider)
 
 	SaveScheduleHandler(w http.ResponseWriter, req *http.Request, prefObj *Preference, user *User, provider Provider)
 	GetSchedulesHandler(w http.ResponseWriter, r *http.Request, prefObj *Preference, user *User, provider Provider)

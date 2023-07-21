@@ -5,19 +5,21 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/go-openapi/runtime/middleware"
+	goswaggermiddleware "github.com/go-openapi/runtime/middleware"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/gorilla/mux"
 	"github.com/layer5io/meshery/server/handlers"
 	"github.com/layer5io/meshery/server/models"
 )
 
 // Router represents Meshery router
 type Router struct {
-	S    *mux.Router
+	Echo *echo.Echo
 	port int
 }
 
+/*
 // NewRouter returns a new ServeMux with app routes.
 func NewRouter(_ context.Context, h models.HandlerInterface, port int, g http.Handler, gp http.Handler) *Router {
 	gMux := mux.NewRouter()
@@ -25,39 +27,7 @@ func NewRouter(_ context.Context, h models.HandlerInterface, port int, g http.Ha
 	gMux.Handle("/api/system/graphql/query", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.KubernetesMiddleware(h.MesheryControllersMiddleware(h.GraphqlMiddleware(g)))), models.ProviderAuth))).Methods("GET", "POST")
 	gMux.Handle("/api/system/graphql/playground", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.KubernetesMiddleware(h.MesheryControllersMiddleware(h.GraphqlMiddleware(gp)))), models.ProviderAuth))).Methods("GET", "POST")
 
-	gMux.HandleFunc("/api/system/version", h.ServerVersionHandler).
-		Methods("GET")
-	gMux.Handle("/api/extension/version", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.ExtensionsVersionHandler), models.ProviderAuth))).
-		Methods("GET")
 	gMux.Handle("/api/system/database", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.GetSystemDatabase), models.ProviderAuth))).
-		Methods("GET")
-
-	gMux.HandleFunc("/api/provider", h.ProviderHandler)
-	gMux.HandleFunc("/api/providers", h.ProvidersHandler).
-		Methods("GET")
-	gMux.PathPrefix("/api/provider/extension").
-		Handler(h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.KubernetesMiddleware(h.MesheryControllersMiddleware(h.ProviderComponentsHandler))), models.ProviderAuth))).
-		Methods("GET", "POST", "OPTIONS", "PUT", "DELETE")
-	gMux.Handle("/api/provider/capabilities", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.ProviderCapabilityHandler), models.ProviderAuth))).
-		Methods("GET")
-	gMux.PathPrefix("/provider").
-		Handler(http.HandlerFunc(h.ProviderUIHandler)).
-		Methods("GET")
-	gMux.HandleFunc("/auth/login", h.ProviderUIHandler).
-		Methods("GET")
-	// gMux.PathPrefix("/provider/").
-	// 	Handler(http.StripPrefix("/provider/", http.FileServer(http.Dir("../provider-ui/out/")))).
-	// 	Methods("GET")
-
-	gMux.Handle("/api/system/sync", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.KubernetesMiddleware(h.MesheryControllersMiddleware(h.SessionSyncHandler))), models.ProviderAuth))).
-		Methods("GET")
-
-	gMux.Handle("/api/user", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.UserHandler), models.ProviderAuth))).
-		Methods("GET")
-	gMux.Handle("/api/user/profile/{id}", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.GetUserByIDHandler), models.ProviderAuth))).
-		Methods("GET")
-
-	gMux.Handle("/api/identity/users", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.GetUsers), models.ProviderAuth))).
 		Methods("GET")
 
 	gMux.Handle("/api/user/prefs", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.UserPrefsHandler), models.ProviderAuth))).
@@ -266,33 +236,6 @@ func NewRouter(_ context.Context, h models.HandlerInterface, port int, g http.Ha
 
 	//gMux.PathPrefix("/api/system/graphql").Handler(h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.GraphqlSystemHandler)))).Methods("GET", "POST")
 
-	gMux.Handle("/user/logout", h.ProviderMiddleware(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		providerI := req.Context().Value(models.ProviderCtxKey)
-		provider, ok := providerI.(models.Provider)
-		if !ok {
-			http.Redirect(w, req, "/provider", http.StatusFound)
-			return
-		}
-		h.LogoutHandler(w, req, provider)
-	})))
-	gMux.Handle("/user/login", h.ProviderMiddleware(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		providerI := req.Context().Value(models.ProviderCtxKey)
-		provider, ok := providerI.(models.Provider)
-		if !ok {
-			http.Redirect(w, req, "/provider", http.StatusFound)
-			return
-		}
-		h.LoginHandler(w, req, provider, false)
-	})))
-	gMux.Handle("/api/user/token", h.ProviderMiddleware(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		providerI := req.Context().Value(models.ProviderCtxKey)
-		provider, ok := providerI.(models.Provider)
-		if !ok {
-			http.Redirect(w, req, "/provider", http.StatusFound)
-			return
-		}
-		h.TokenHandler(w, req, provider, false)
-	}))).Methods("POST", "GET")
 	gMux.Handle("/api/token", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(
 		func(w http.ResponseWriter, req *http.Request, _ *models.Preference, _ *models.User, provider models.Provider) {
 			provider.ExtractToken(w, req)
@@ -324,23 +267,160 @@ func NewRouter(_ context.Context, h models.HandlerInterface, port int, g http.Ha
 	gMux.Handle("/api/integrations/connections/{connectionId}", h.ProviderMiddleware(h.AuthMiddleware(h.SessionInjectorMiddleware(h.DeleteConnection), models.ProviderAuth))).
 		Methods("DELETE")
 
-	// Swagger Interactive Playground
-	swaggerOpts := middleware.SwaggerUIOpts{SpecURL: "./swagger.yaml"}
-	swaggerSh := middleware.SwaggerUI(swaggerOpts, nil)
-	gMux.Handle("/swagger.yaml", http.FileServer(http.Dir("../helpers/")))
-	gMux.Handle("/docs", swaggerSh)
-	fs := http.FileServer(http.Dir("../../ui"))
-	gMux.PathPrefix("/ui/public/static/img/meshmodels").Handler(http.StripPrefix("/ui/", fs)).Methods("GET")
-	gMux.PathPrefix("/").
-		Handler(h.ProviderMiddleware(h.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			handlers.ServeUI(w, r, "", "../../ui/out/")
-		}), models.ProviderAuth))).
-		Methods("GET")
-
 	return &Router{
 		S:    gMux,
 		port: port,
 	}
+}
+*/
+
+func NewRouter(_ context.Context, h models.HandlerInterface, port int, g http.Handler, gp http.Handler) *Router {
+	e := echo.New()
+
+	e.Use(middleware.Recover())
+
+	// Group common routes under "/api" prefix
+	apiGroup := e.Group("/api")
+	apiGroup.Use(echo.WrapMiddleware(h.ProviderMiddleware))
+	apiGroup.Use(echo.WrapMiddleware(h.AuthMiddleware))
+	// apiGroup.Use(echo.WrapMiddleware(h.SessionInjectorMiddleware))
+	// apiGroup.Use(echo.WrapMiddleware(h.KubernetesMiddleware))
+	// apiGroup.Use(echo.Middleware(h.MesheryControllersMiddleware))
+
+	// Register GET /api/extension/version route
+	// apiGroup.GET("/extension/version", echo.WrapHandler(h.ExtensionsVersionHandler))
+
+	// Register GET /api/session route
+	apiGroup.GET("/session", sessionHandler)
+
+	apiGroup.Any("/provider/extension/*", echo.WrapHandler(http.HandlerFunc(h.ProviderComponentsHandler)))
+
+	// Register GET /api/provider/capabilities route
+	apiGroup.GET("/provider/capabilities", echo.WrapHandler(http.HandlerFunc(h.ProviderCapabilityHandler)))
+
+	// Register GET /api/identity/users route
+	// apiGroup.GET("/identity/users", echo.WrapHandler(http.HandlerFunc(h.GetUsers)))
+
+	// Register GET /api/user route
+	apiGroup.GET("/user", echo.WrapHandler(http.HandlerFunc(h.UserHandler)))
+
+	// Register GET /api/user/provider/:id route
+	apiGroup.GET("/user/provider/:id", echo.WrapHandler(http.HandlerFunc(h.GetUserByIDHandler)))
+
+	// Register GET /api/system/database
+	// apiGroup.GET("/system/database", echo.WrapHandler(http.HandlerFunc(h.GetSystemDatabase)))
+
+	// Register GET /api/system/sync
+	apiGroup.GET("/system/sync", echo.WrapHandler(http.HandlerFunc(h.SessionSyncHandler)))
+
+	// Group common routes under "/api/user/token" prefix
+	tokenGroup := e.Group("/api/user/token")
+	tokenGroup.Use(echo.WrapMiddleware(h.ProviderMiddleware))
+	// tokenGroup.Use(echo.WrapMiddleware(h.SessionInjectorMiddleware))
+
+	// Register GET /api/user/token route
+	tokenGroup.GET("", tokenHandler)
+
+	// Register POST /api/user/token route
+	tokenGroup.GET("", tokenHandler)
+
+	// Group common routes under "/user" prefix
+	userGroup := e.Group("/user")
+	userGroup.Use(echo.WrapMiddleware(h.ProviderMiddleware))
+	userGroup.Use(echo.WrapMiddleware(h.AuthMiddleware))
+
+	userGroup.GET("/login", echo.WrapHandler(http.HandlerFunc(loginHandler)))
+	userGroup.GET("/logout", echo.WrapHandler(http.HandlerFunc(logoutHandler)))
+
+	// Routes outside the common group
+	// Serve swagger.yaml file
+	e.Static("/swagger.yaml", "../helpers/")
+
+	// Serve Swagger UI
+	swaggerOpts := goswaggermiddleware.RedocOpts{
+		SpecURL: "/swagger.yaml",
+		Path:    "/docs",
+	}
+	redocHandler := goswaggermiddleware.Redoc(swaggerOpts, nil)
+	e.GET("/docs", func(c echo.Context) error {
+		redocHandler.ServeHTTP(c.Response().Writer, c.Request())
+		return nil
+	})
+
+	// Register GET / route  - returns static page from Next.js page /
+	// e.GET("/", echo.WrapHandler(http.HandlerFunc(h.NextProviderPageHandler)))
+	// Serve static files
+	e.Static("/ui/public/static/img/meshmodels", "../../ui")
+	e.GET("/", func(e echo.Context) error {
+		return e.File("../../ui/out/index.html")
+	})
+
+	// Register GET /provider route - returns static page from Next.js page /provider
+	e.GET("/provider", echo.WrapHandler(http.HandlerFunc(h.ProviderUIHandler)))
+
+	// Register GET /auth/login route
+	e.GET("/auth/login", echo.WrapHandler(http.HandlerFunc(h.ProviderUIHandler)))
+
+	// Register GET /api/system/version route
+	e.GET("/api/system/version", echo.WrapHandler(http.HandlerFunc(versionHandler)))
+
+	// Register GET /api/provider route
+	e.GET("/api/provider", echo.WrapHandler(http.HandlerFunc(h.ProviderHandler)))
+
+	// Register GET /api/providers route
+	e.GET("/api/providers", echo.WrapHandler(http.HandlerFunc(h.ProvidersHandler)))
+
+	return &Router{
+		Echo: e,
+		port: port,
+	}
+}
+
+// Handler function for "/api/session" route
+func sessionHandler(c echo.Context) error {
+	return c.String(http.StatusOK, "Hello")
+}
+
+// Handler function for "/api/system/version" route
+func versionHandler(w http.ResponseWriter, r *http.Request) {
+	h := &handlers.Handler{}
+	h.ServerVersionHandler(w, r)
+}
+
+// Handler function for /user/login requests - will redirect to /provider
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+	h := &handlers.Handler{}
+	providerI := r.Context().Value(models.ProviderCtxKey)
+	provider, ok := providerI.(models.Provider)
+	if !ok {
+		http.Redirect(w, r, "/provider", http.StatusFound)
+		return
+	}
+	h.LoginHandler(w, r, provider, false)
+}
+
+// Handler function for /user/logout requests
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	h := &handlers.Handler{}
+	providerI := r.Context().Value(models.ProviderCtxKey)
+	provider, ok := providerI.(models.Provider)
+	if !ok {
+		http.Redirect(w, r, "/provider", http.StatusFound)
+		return
+	}
+	h.LogoutHandler(w, r, provider)
+}
+
+func tokenHandler(c echo.Context) error {
+	h := &handlers.Handler{}
+	providerI := c.Request().Context().Value(models.ProviderCtxKey)
+	provider, ok := providerI.(models.Provider)
+	if !ok {
+		return c.Redirect(http.StatusFound, "/provider")
+	}
+
+	h.TokenHandler(c.Response().Writer, c.Request(), provider, false)
+	return nil
 }
 
 // Run starts the http server
@@ -354,5 +434,5 @@ func (r *Router) Run() error {
 	// 	IdleTimeout:    0, //time.Second,
 	// }
 	// return s.ListenAndServe()
-	return http.ListenAndServe(fmt.Sprintf(":%d", r.port), r.S)
+	return http.ListenAndServe(fmt.Sprintf(":%d", r.port), r.Echo)
 }

@@ -100,10 +100,8 @@ func (h *Handler) ProviderUIHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ProviderCapabilityHandler(
 	w http.ResponseWriter,
 	r *http.Request,
-	_ *models.Preference,
-	_ *models.User,
-	provider models.Provider,
 ) {
+	var provider models.Provider
 	provider.GetProviderCapabilities(w, r)
 }
 
@@ -119,10 +117,11 @@ func (h *Handler) ProviderCapabilityHandler(
 func (h *Handler) ProviderComponentsHandler(
 	w http.ResponseWriter,
 	r *http.Request,
-	prefObj *models.Preference,
-	user *models.User,
-	provider models.Provider,
 ) {
+	var prefObj *models.Preference
+	var user *models.User
+	var provider models.Provider
+
 	uiReqBasePath := "/api/provider/extension"
 	serverReqBasePath := "/api/provider/extension/server/"
 	loadReqBasePath := "/api/provider/extension/"
