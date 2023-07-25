@@ -218,9 +218,8 @@ func (h *Handler) addAdapter(ctx context.Context, meshAdapters []*models.Adapter
 		h.log.Error(ErrRetrieveMeshData(err))
 		return meshAdapters, err
 	}
-	h.log.Debug("retrieved name for adapter: ", meshLocationURL)
 
-	adapter := models.Adapter{
+	adapter := &models.Adapter{
 		Host:         meshLocationURL,
 		Name:         meshInfo.Name,
 		Version:      meshInfo.Version,
@@ -229,10 +228,14 @@ func (h *Handler) addAdapter(ctx context.Context, meshAdapters []*models.Adapter
 		Port:         models.GetNextAvailablePort(),
 	}
 
-	adapter.Available = models.CheckAdapterAvailability(adapter) // Check if the adapter is pingable
+	// Set the initial availability to true
+	adapter.Available = true
 
-	h.config.AdapterTracker.AddAdapter(ctx, adapter)
-	meshAdapters = append(meshAdapters, &adapter)
+	// Start the background goroutine to check the availability periodically
+	models.CheckAdapterAvailability(adapter)
+
+	h.config.AdapterTracker.AddAdapter(ctx, *adapter)
+	meshAdapters = append(meshAdapters, adapter)
 	return meshAdapters, nil
 }
 
@@ -298,7 +301,8 @@ func (h *Handler) MeshOpsHandler(w http.ResponseWriter, req *http.Request, prefO
 
 	aID := -1
 	for i, ad := range meshAdapters {
-		if adapterLoc == ad.Host {
+		// Compare the entire adapter URL (host:port) with adapterLoc
+		if adapterLoc == fmt.Sprintf("%s:%s", ad.Host, ad.Port) {
 			aID = i
 			break
 		}

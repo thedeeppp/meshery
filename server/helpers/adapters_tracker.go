@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -52,20 +53,16 @@ func NewAdaptersTracker(adapterURLs []string) *AdaptersTracker {
 	return a
 }
 
-func extractPortFromURL(urlStr string) (int, error) {
-	parsedURL, err := url.Parse(urlStr)
+func extractPortFromURL(urlstr string) (string, error) {
+	u, err := url.Parse(urlstr)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
-	portStr := parsedURL.Port()
-	if portStr == "" {
-		return 0, fmt.Errorf("no port specified in URL")
-	}
-
-	port, err := strconv.Atoi(portStr)
+	// Split the host:port from the URL
+	_, port, err := net.SplitHostPort(u.Host)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
 	return port, nil
@@ -120,7 +117,7 @@ func (a *AdaptersTracker) DeployAdapter(ctx context.Context, adapter models.Adap
 		_, _ = io.Copy(os.Stdout, reader)
 
 		// Create and start the container
-		portNum := strconv.Itoa(adapter.Port)
+		portNum := adapter.Port
 		port := nat.Port(portNum + "/tcp")
 		resp, err := cli.ContainerCreate(ctx, &container.Config{
 			Image: adapterImage,
@@ -173,7 +170,7 @@ func (a *AdaptersTracker) UndeployAdapter(ctx context.Context, adapter models.Ad
 		found := false
 		for _, container := range containers {
 			for _, p := range container.Ports {
-				if strconv.Itoa(int(p.PublicPort)) == strconv.Itoa(adapter.Port) {
+				if strconv.Itoa(int(p.PublicPort)) == adapter.Port {
 					found = true
 
 					// Stop and remove the container

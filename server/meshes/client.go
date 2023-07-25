@@ -1,10 +1,11 @@
 package meshes
 
 import (
-	context "context"
+	"context"
+	"net"
+	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // MeshClient represents a gRPC adapter client
@@ -14,17 +15,22 @@ type MeshClient struct {
 }
 
 // CreateClient creates a MeshClient for the given params
-func CreateClient(_ context.Context, meshLocationURL string) (*MeshClient, error) {
+func CreateClient(ctx context.Context, meshLocationURL string) (*MeshClient, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second) // Set an appropriate timeout
+	defer cancel()
+
 	var opts []grpc.DialOption
-	// creds, err := credentials.NewClientTLSFromFile(*caFile, *serverHostOverride)
-	// 	if err != nil {
-	// 		logrus.Errorf("Failed to create TLS credentials %v", err)
-	// 	}
-	// 	opts = append(opts, grpc.WithTransportCredentials(creds))
-	// } else {
-	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	// }
-	conn, err := grpc.Dial(meshLocationURL, opts...)
+
+	// Use insecure credentials for now
+	opts = append(opts, grpc.WithInsecure())
+
+	// Set up dialer with context timeout
+	dialer := func(ctx context.Context, addr string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	}
+	opts = append(opts, grpc.WithContextDialer(dialer))
+
+	conn, err := grpc.DialContext(ctx, meshLocationURL, opts...)
 	if err != nil {
 		return nil, err
 	}

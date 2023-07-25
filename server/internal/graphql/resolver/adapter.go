@@ -3,7 +3,6 @@ package resolver
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/layer5io/meshery/server/helpers"
@@ -37,7 +36,7 @@ func (r *Resolver) changeAdapterStatus(_ context.Context, _ models.Provider, tar
 			return model.StatusUnknown, helpers.ErrAdapterInsufficientInformation(fmt.Errorf("adapter name is not available, unable to determine the target port"))
 		}
 
-		targetPort = strconv.Itoa(selectedAdapter.Port)
+		targetPort = selectedAdapter.Port
 	}
 
 	platform := utils.GetPlatform()
@@ -106,15 +105,10 @@ func extractNameFromTarget(target string) string {
 	return ""
 }
 
-func extractPortFromTarget(target string) int {
+func extractPortFromTarget(target string) string {
 	parts := strings.Split(target, ":")
 	if len(parts) > 1 {
-		port, err := strconv.Atoi(parts[1])
-		if err != nil {
-			// Return a default value or handle the error case
-			return 0
-		}
-		return port
+		return parts[1]
 	}
-	return 0
+	return ""
 }
