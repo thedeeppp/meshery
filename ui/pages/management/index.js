@@ -1,27 +1,27 @@
 import { NoSsr } from "@material-ui/core";
-import Head from "next/head";
-import { withRouter } from "next/router";
-import React from "react";
-import { connect } from "react-redux";
-import { bindActionCreators } from "redux";
 import MesheryPlayComponent from "../../components/MesheryPlayComponent";
+import { useEffect } from "react";
+import { useDispatch } from "react-redux";
 import { updatepagepath } from "../../lib/store";
-class Manage extends React.Component {
-  render() {
-    return (
-      <NoSsr>
-        <Head>
-          <title>Management | Meshery </title>
-        </Head>
-        <MesheryPlayComponent />
-      </NoSsr>
-    );
-  }
-}
+import Head from "next/head";
+import { getPath } from "../../lib/path";
 
-const mapDispatchToProps = (dispatch) => {
-  return { updatepagepath : bindActionCreators(updatepagepath, dispatch), };
+const Manage = () => {
+  const dispatch = useDispatch();
+
+  useEffect(() => {
+    console.log(`path: ${getPath()}`);
+    dispatch(updatepagepath({ path : getPath() }));
+  }, [dispatch]);
+
+  return (
+    <NoSsr>
+      <Head>
+        <title>Management | Meshery</title>
+      </Head>
+      <MesheryPlayComponent />
+    </NoSsr>
+  );
 };
 
-export default connect(null, mapDispatchToProps)(withRouter(Manage));
-
+export default Manage;

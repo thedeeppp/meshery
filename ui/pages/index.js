@@ -9,8 +9,8 @@ import { updatepagepath } from "../lib/store";
 
 class Index extends React.Component {
   componentDidMount () {
-    console.log(`path: ${getPath()}`);
-    this.props.updatepagepath({ path : getPath() });
+    console.log(`path: ${getPath()}`)
+    this.props.updatepagepath({ path : getPath() })
   }
 
   render () {

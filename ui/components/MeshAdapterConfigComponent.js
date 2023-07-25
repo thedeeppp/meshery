@@ -2,10 +2,10 @@ import { useEffect, useState } from "react"
 import { updateProgress } from "../lib/store"
 import dataFetch from "../lib/data-fetch"
 import { useSnackbar } from "notistack"
-// import { Chip, IconButton, Button, TextField, Tooltip } from "@material-ui/core";
-import { IconButton } from "@material-ui/core"
+import { Chip, IconButton, Button, Tooltip } from "@material-ui/core";
 // import changeAdapterState from "./graphql/mutations/AdapterStatusMutation";
 import CloseIcon from "@material-ui/icons/Close"
+import { useSelector } from "react-redux";
 // import { iconMedium } from "../css/icons.styles";
 
 /*
@@ -56,29 +56,53 @@ const styles = (theme) => ({
 });
 */
 
-export default function MeshAdapterConfigComponent(props) {
-  const {
-    meshAdapters,
-    meshAdaptersTimeStamp
-  } = props;
+export default function MeshAdapterConfigComponent({ classes }) {
+  const meshAdapters = useSelector((state) => state.get("meshAdapters"))
 
   // const labelRef = useRef(null);
-  const [mesheryAdapters, setMesheryAdapters] = useState(meshAdapters);
-  const [adaptersURLs, setAdapterURLs] = useState([]);
+  // const [mesheryAdapters, setMesheryAdapters] = useState(meshAdapters);
+  // const [timeStamp, setTimeStamp] = useState(meshAdaptersTimeStamp);
   const [availableAdapters, setAvailableAdapters] = useState([]);
-  const [timeStamp, setTimeStamp] = useState(meshAdaptersTimeStamp);
+  const [setAdapterURLs, setSetAdapterURLs] = useState([]);
+  // const [meshLocationURL, setMeshLocationURL] = useState("");
   // const [meshLocationURLError, setMeshLocationURLError] = useState(false);
+  // const [meshDeployURLError, setMeshDeployURLError] = useState(false);
+  // const [selectedAvailableAdapter, setSelectedAvailableAdapter] = useState("");
   // const [selectedAvailableAdapterError, setSelectedAvailableAdapterError] = useState(false);
+  // const [meshDeployURL, setMeshDeployURL] = useState("");
 
   const { enqueueSnackbar, closeSnackbar } = useSnackbar
 
-
+  /*
   useEffect(() => {
     if (mesheryAdapters > timeStamp) {
       setMesheryAdapters(meshAdapters)
       setTimeStamp(meshAdaptersTimeStamp)
     }
   }, [mesheryAdapters, meshAdaptersTimeStamp, timeStamp])
+  */
+
+  useEffect(() => {
+    // Set initial state from meshAdapters
+    setAvailableAdapters(
+      meshAdapters.map((adapter) => ({
+        value : adapter.adapter_location,
+        label : `Meshery Adapter for ${adapter.name.toLowerCase()} (${adapter.version})`,
+      }))
+    );
+
+    setSetAdapterURLs(
+      meshAdapters.map((adapter) => ({
+        value : adapter.adapter_location,
+        label : `Mesh Adapter URL ${adapter.name}`,
+      }))
+    );
+
+    // Clean up the event listener on unmount to avoid memory leaks.
+    return () => {
+      router.events.off("routeChangeComplete", handleRouteChange);
+    };
+  }, [meshAdapters]);
 
   useEffect(() => {
     fetchSetAdapterURLs()
@@ -93,6 +117,43 @@ export default function MeshAdapterConfigComponent(props) {
       console.error(`Error checking adapter pingability: ${error}`);
       return false;
     }
+  };
+
+  const fetchAvailableAdapters = () => {
+    updateProgress({ showProgress : true });
+    dataFetch(
+      "/api/system/availableAdapters",
+      {
+        method : "GET",
+        credentials : "include",
+      },
+      async (result) => {
+        updateProgress({ showProgress : false });
+        console.log("Result from availableAdapters API:", result); // Log the result array
+        if (typeof result !== "undefined") {
+          const options = await Promise.all(
+            result.map(async (res) => {
+              const isPingable = await checkAdapterPingability(
+                "localhost",
+                res.port
+              );
+              console.log(
+                `Adapter: ${res.name}, Port: ${res.port}`
+              ); // Log the adapter details and pingability result
+              return {
+                value : res.port,
+                label : `${res.name}:${res.port}`, // Use the combined name and port
+                pingable : isPingable,
+              };
+            })
+          );
+          console.log("availableAdapters initial state: ", availableAdapters);
+          console.log("List available adapters: ", options);
+          setAvailableAdapters(options);
+        }
+      },
+      handleError("Unable to fetch available adapters")
+    );
   };
 
   const fetchSetAdapterURLs = () => {
@@ -113,43 +174,9 @@ export default function MeshAdapterConfigComponent(props) {
               pingable : await checkAdapterPingability(res.adapter_name, res.adapter_port),
             }))
           );
-          console.log("adaptersURLs initial state: ", adaptersURLs);
+          console.log("adaptersURLs initial state: ", setAdapterURLs);
           console.log("Set Adapter URLs:", options); // Log the fetched Set Adapter URLs
           setAdapterURLs(options);
-        }
-      },
-      handleError("Unable to fetch available adapters")
-    );
-  };
-
-  const fetchAvailableAdapters = () => {
-    updateProgress({ showProgress : true });
-    dataFetch(
-      "/api/system/availableAdapters",
-      {
-        method : "GET",
-        credentials : "include",
-      },
-      async (result) => {
-        updateProgress({ showProgress : false });
-        console.log("Result from availableAdapters API:", result); // Log the result array
-        if (typeof result !== "undefined") {
-          const options = await Promise.all(
-            result.map(async (res) => {
-              const isPingable = await checkAdapterPingability("localhost", res.port);
-              console.log(
-                `Adapter: ${res.name}, Port: ${res.port}, Pingable: ${isPingable}`
-              ); // Log the adapter details and pingability result
-              return {
-                value : res.port,
-                label : res.name + ":" + res.port,
-                pingable : isPingable,
-              };
-            })
-          );
-          console.log("availableAdapters initial state: ", availableAdapters);
-          console.log("List available adapters: ", options);
-          setAvailableAdapters(options);
         }
       },
       handleError("Unable to fetch available adapters")
@@ -454,6 +481,57 @@ export default function MeshAdapterConfigComponent(props) {
     }
   };
   */
+
+  const renderAdapters = () => {
+    if (meshAdapters.length === 0) {
+      return (
+        <div className={classes.alreadyConfigured}>
+          <Button
+            variant="contained"
+            color="primary"
+            size="large"
+            onClick={handleConfigure}
+          >
+            Configure Settings
+          </Button>
+        </div>
+      );
+    }
+
+    return (
+      <div className={classes.alignRight}>
+        {meshAdapters.map((adapter) => {
+          let image = "/static/img/meshery-logo.png";
+          let logoIcon = <img src={image} className={classes.icon} />;
+          if (adapter.name) {
+            image = `/static/img/${adapter.name.toLowerCase()}.svg`;
+            logoIcon = <img src={image} className={classes.icon} />;
+          }
+
+          return (
+            <Tooltip
+              key={adapter.uniqueID}
+              title={`Meshery Adapter for ${adapter.name
+                .toLowerCase()
+                .split(" ")
+                .map((s) => s.charAt(0).toUpperCase() + s.substring(1))
+                .join(" ")} (${adapter.version})`}
+            >
+              <Chip
+                className={classes.chip}
+                label={adapter.adapter_port}
+                onDelete={handleDelete(adapter.adapter_port)}
+                onClick={handleClick(adapter.adapter_port)}
+                icon={logoIcon}
+                variant="outlined"
+                data-cy="chipAdapterLocation"
+              />
+            </Tooltip>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div></div>
