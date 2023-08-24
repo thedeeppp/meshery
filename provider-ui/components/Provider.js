@@ -5,7 +5,7 @@ import ProviderLayout from "./ProviderLayout"
 import { CustomDiv, CustomDialog, MesheryLogo, MenuProviderDisabled } from "./Provider.style";
 import Button from "@mui/material/Button"
 import ButtonGroup from "@mui/material/ButtonGroup"
-import Divider from "@mui/material/Divider"
+import { Divider, IconButton, Tooltip, Typography } from "@layer5/sistent-components"
 import DialogActions from "@mui/material/DialogActions"
 import DialogContent from "@mui/material/DialogContent"
 import DialogContentText from "@mui/material/DialogContentText"
@@ -13,9 +13,6 @@ import DialogTitle from "@mui/material/DialogTitle"
 import Popover from "@mui/material/Popover"
 import MenuList from "@mui/material/MenuList"
 import MenuItem from "@mui/material/MenuItem"
-import Tooltip from "@mui/material/Tooltip"
-import Typography from "@mui/material/Typography"
-import IconButton from "@mui/material/IconButton"
 import CircularProgress from '@mui/material/CircularProgress'
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 import CloseIcon from "@mui/icons-material/Close"

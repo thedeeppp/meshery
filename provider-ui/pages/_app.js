@@ -6,8 +6,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { CacheProvider } from '@emotion/react';
 import theme from '../styles/theme';
 import createEmotionCache from '../lib/createEmotionCache';
-import Box from "@mui/material/Box";
-import Paper from "@mui/material/Paper";
+import { Box, Paper } from "@layer5/sistent-components"
 import Footer from "../components/Footer";
 
 // Client-side cache, shared for the whole session of the user in the browser.
